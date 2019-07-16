@@ -72,9 +72,13 @@ jobs:
     displayName: 'Bash Script: Mount File Shares specific for Spinnaker'
     condition: eq(variables['mountFileShare'], true)
   
+  - script: ./configure
+    workingDirectory: $(Build.SourcesDirectory)
+    displayName: 'Command Line Script: Configure'  
+
   - script: make
-    workingDirectory: $(Build.SourcesDirectory)/cpp
-    displayName: 'Command Line Script: Run make'  
+    workingDirectory: $(Build.SourcesDirectory)
+    displayName: 'Command Line Script: Run Make'      
 
   # Archive files from source directory and save compressed files in artifact staging directory
   # $(Build.SourcesDirectory): \usr\local\agent_work\1\s
