@@ -1,0 +1,135 @@
+# Starter pipeline
+# Start with a minimal pipeline that you can customize to build and deploy your code.
+# Add steps that build, run tests, deploy, and more:
+# https://aka.ms/yaml
+
+trigger:
+- master
+
+variables:
+# Variable group name
+- group: azure-var
+
+jobs:
+#####################################################################################################################################
+# Agentless phase: Deploy Linux agent via Azure Function
+#####################################################################################################################################
+- job: DeployAgent
+  pool: server
+
+  steps:
+  - task: AzureFunction@1
+    displayName: 'Azure Function: Create Linux agent from custom image'
+    inputs:
+      # Azure Function URL and Function Key. Define these variables in the 'Variables' tab and select the key to be secret.
+      function: '$(deployAgent)'
+      key: '$(deployAgentFuncKey)'
+      method: GET
+      queryParameters: 'name=buildAgent-$(Build.BuildId)'
+  # Currently, build step fails immediately because it does not wait for agent to become available before running build.
+  # The delay task is a temporary fix.
+  - task: Delay@1
+    displayName: 'Delay by 3 minutes. Waiting for agent to connect to Azure DevOps...'
+    inputs:
+      delayForMinutes: 3
+
+#####################################################################################################################################
+# Agent build phase: Run example cpp job (https://github.com/vincentsiu/cpython)
+#####################################################################################################################################
+- job: AgentPhase
+  dependsOn: DeployAgent
+  pool:
+    name: CustomAgentPool
+    demands: Agent.Name -equals buildAgent-$(Build.BuildId)
+
+  steps:
+  # Add variable 'mountFileShare' and set to true before queuing the build to run the file share mount script.
+  - bash: |
+      #!/bin/bash
+      StorageAccountName="$(fileShareStorageAccount)"
+      StorageAccountKey="$(fileShareStorageKey)"
+      
+      ShareNames=("Development" "work" "softwarelib")
+      SmbVersion="3.0"
+      sudo mkdir /cif
+      
+      # Set-up cifs
+      for share in "${ShareNames[@]}";
+      do
+        sudo mkdir /cif/"$share"
+        lowercaseShare=${share,,}
+        # dir_mode and file_mode temporary set to 0777 for editing. For deployment, will need to change permissions to avoid accidental file share modification.
+        sudo mount -t cifs //$StorageAccountName.file.core.windows.net/"$lowercaseShare" /cif/"$share" -o vers=$SmbVersion,username=$StorageAccountName,password=$StorageAccountKey,dir_mode=0777,file_mode=0777,serverino
+      done
+      
+      # Set-up symlinks
+      sudo ln -s -f /cif/Development /project
+      sudo ln -s -f /cif/work /
+      sudo ln -s -f /cif/softwarelib /
+      sudo ln -s -f /cif/Development /mnt/
+      sudo ln -s -f /cif/work /mnt/
+      sudo ln -s -f /cif/softwarelib /mnt/software-lib
+    displayName: 'Bash Script: Mount File Shares specific for Spinnaker'
+    condition: eq(variables['mountFileShare'], true)
+  
+  - script: make
+    workingDirectory: $(Build.SourcesDirectory)/cpp
+    displayName: 'Command Line Script: Run make'  
+
+  # Archive files from source directory and save compressed files in artifact staging directory
+  # $(Build.SourcesDirectory): \usr\local\agent_work\1\s
+  # $(Build.ArtifactStagingDirectory): \usr\local\agent_work\1\a
+  # More information on predefined variables: https://docs.microsoft.com/en-us/azure/devops/pipelines/build/variables?view=azure-devops&tabs=yaml
+  - task: ArchiveFiles@2
+    displayName: 'Archive $(Build.SourcesDirectory)'
+    inputs:
+      rootFolderOrFile: '$(Build.SourcesDirectory)'
+      includeRootFolder: true
+      archiveType: 'zip'
+      archiveFile: '$(Build.ArtifactStagingDirectory)/$(Build.BuildId).zip'
+      replaceExistingArchive: true
+  
+  # AzCopy copies artifact from agent to blob for Linux agents
+  # Define storage account key in the 'Variables' tab and select it to be secret
+  - script: |
+      azcopy \
+      --source $(Build.ArtifactStagingDirectory)/$(Build.BuildId).zip \
+      --destination https://$(storageAccountName).blob.core.windows.net/$(storageAccountContainer)/$(Build.BuildId).zip \
+      --dest-key $(storageAccountKey)
+    displayName: 'Command Line Script: Azcopy artifacts to Azure Blob'
+
+#####################################################################################################################################
+# Agentless phase: Remove Linux agent via Azure Function
+#####################################################################################################################################
+- job: RemoveAgent
+  dependsOn:
+    - DeployAgent
+    - AgentPhase
+  condition: and(in(dependencies.DeployAgent.result, 'Succeeded'), in(dependencies.AgentPhase.result, 'Failed', 'Succeeded', 'SucceededWithIssues', 'Skipped'))
+  pool: server
+
+  steps:
+  - task: AzureFunction@1
+    displayName: 'Azure Function: Remove Agent'
+    inputs:
+      # Azure Function URL and Function Key. Define these variables in the 'Variables' tab and select the key to be secret.
+      function: '$(removeAgent)'
+      key: '$(removeAgentFuncKey)'
+      method: GET
+      queryParameters: 'name=buildAgent-$(Build.BuildId)'
+  
+  # The delay task is a temporary fix. Currently, delete function exceeds maximum timeout duration.
+  - task: Delay@1
+    displayName: 'Delay by 17 minutes. Waiting for agent to be deleted from Azure...'
+    inputs:
+      delayForMinutes: 17
+  
+  - task: AzureFunction@1
+    displayName: 'Azure Function: Check whether agent has been deleted'
+    inputs:
+      function: '$(checkAgent)'
+      key: '$(checkAgentFuncKey)'
+      method: GET
+      queryParameters: 'name=buildAgent-$(Build.BuildId)'
+
+
