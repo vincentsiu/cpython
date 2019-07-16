@@ -72,7 +72,7 @@ jobs:
     displayName: 'Bash Script: Mount File Shares specific for Spinnaker'
     condition: eq(variables['mountFileShare'], true)
   
-  - script: .configure
+  - script: ./configure
     workingDirectory: $(Build.SourcesDirectory)
     displayName: 'Command Line Script: Configure'  
 
