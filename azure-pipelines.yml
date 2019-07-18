@@ -26,6 +26,12 @@ jobs:
       key: '$(deployAgentFuncKey)'
       method: GET
       queryParameters: 'name=buildAgent-$(Build.BuildId)'
+  # Currently, build step fails immediately because it does not wait for agent to become available before running build.
+  # The delay task is a temporary fix.
+  - task: Delay@1
+    displayName: 'Delay by 3 minutes. Waiting for agent to connect to Azure DevOps...'
+    inputs:
+      delayForMinutes: 3      
 
 #####################################################################################################################################
 # Agent build phase: Run example cpp job (https://github.com/vincentsiu/cpython)
