@@ -106,7 +106,8 @@ jobs:
 - job: RemoveAgent
   dependsOn:
     - DeployAgent
-    - AgentPhase
+    - AgentPhase0
+    - AgentPhase1
   condition: and(in(dependencies.DeployAgent.result, 'Succeeded'), in(dependencies.AgentPhase.result, 'Failed', 'Succeeded', 'SucceededWithIssues', 'Skipped'))
   pool: server
 
