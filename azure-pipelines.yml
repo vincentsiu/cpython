@@ -30,15 +30,12 @@ jobs:
 #####################################################################################################################################
 # Agent build phase: Run example cpp job (https://github.com/vincentsiu/cpython)
 #####################################################################################################################################
-- job: AgentPhase0
-  timeoutInMinutes: 3
+- job: AgentPhase
+
   dependsOn: DeployAgent
   pool:
     name: CustomAgentPool
     demands: Agent.Name -equals buildAgent-$(Build.BuildId)
-
-- job: AgentPhase1
-  dependsOn: AgentPhase0
 
   steps:
   # Add variable 'mountFileShare' and set to true before queuing the build to run the file share mount script.
@@ -106,8 +103,8 @@ jobs:
 - job: RemoveAgent
   dependsOn:
     - DeployAgent
-    - AgentPhase0
-    - AgentPhase1
+    - AgentPhase
+    
   condition: and(in(dependencies.DeployAgent.result, 'Succeeded'), in(dependencies.AgentPhase.result, 'Failed', 'Succeeded', 'SucceededWithIssues', 'Skipped'))
   pool: server
 
